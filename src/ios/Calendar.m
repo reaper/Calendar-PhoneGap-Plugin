@@ -8,6 +8,7 @@
 @implementation Calendar
 @synthesize eventStore;
 @synthesize interactiveCallbackId;
+@synthesize interactiveModify;
 
 #pragma mark Initialization functions
 
@@ -198,6 +199,16 @@
         theEvent.endDate = [NSDate dateWithTimeIntervalSince1970:_nendInterval];
       }
 
+      NSNumber* allDay = [newCalOptions objectForKey:@"allday"];
+      if (allDay!=nil && allDay != (id)[NSNull null]) {
+        theEvent.allDay=allDay.boolValue;
+      }
+      EKSpan span = EKSpanThisEvent;
+      NSNumber* spanFutureEvents = [newCalOptions objectForKey:@"spanFutureEvents"];
+      if (spanFutureEvents != nil && spanFutureEvents != (id)[NSNull null]) {
+        span = spanFutureEvents.boolValue ? EKSpanFutureEvents : EKSpanThisEvent;
+      }
+
       // remove any existing alarms because there would be no other way to remove them
       for (EKAlarm *alarm in theEvent.alarms) {
         [theEvent removeAlarm:alarm];
@@ -239,7 +250,7 @@
 
       // Now save the new details back to the store
       NSError *error = nil;
-      [self.eventStore saveEvent:theEvent span:EKSpanThisEvent error:&error];
+      [self.eventStore saveEvent:theEvent span:span error:&error];
 
 
       // Check error code + return result
@@ -267,6 +278,13 @@
   NSString* notes      = [options objectForKey:@"notes"];
   NSNumber* startTime  = [options objectForKey:@"startTime"];
   NSNumber* endTime    = [options objectForKey:@"endTime"];
+  NSString* calEventID = [options objectForKey:@"id"];
+  NSNumber* spanFutureEvents = [options objectForKey:@"spanFutureEvents"];
+  BOOL checkId = (calEventID!=nil && calEventID!=(id)[NSNull null]);
+  EKSpan span = EKSpanThisEvent;
+  if (spanFutureEvents != nil && spanFutureEvents != (id)[NSNull null]) {
+    span = spanFutureEvents.boolValue ? EKSpanFutureEvents : EKSpanThisEvent;
+  }
 
   [self.commandDelegate runInBackground: ^{
     NSTimeInterval _startInterval = [startTime doubleValue] / 1000; // strip millis
@@ -277,11 +295,26 @@
 
     NSArray *calendars = [NSArray arrayWithObject:calendar];
     NSArray *matchingEvents = [self findEKEventsWithTitle:title location:location notes:notes startDate:myStartDate endDate:myEndDate calendars:calendars];
-
     NSError *error = NULL;
+    EKEvent* idEvent = nil;
+    if (checkId ) {
+      idEvent = (EKEvent*)[self.eventStore calendarItemWithIdentifier:calEventID];
+      if (idEvent==nil) {
+        CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[NSString stringWithFormat:@"Can't find event with id:%@",calEventID]];
+        [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+        return;
+      }
+    }
     for (EKEvent * event in matchingEvents) {
+      if (checkId && ![calEventID isEqualToString:event.calendarItemIdentifier]) {
+        continue;
+      }
       // NOTE: as per issue #150 you can delete this event AND future events by passing span:EKSpanFutureEvents
-      [self.eventStore removeEvent:event span:EKSpanThisEvent error:&error];
+      [self.eventStore removeEvent:event span:span error:&error];
+       if (checkId && span==EKSpanFutureEvents ) {
+         //we only need one event to delete all future ones
+         break;
+      }
     }
 
     CDVPluginResult *pluginResult = nil;
@@ -379,6 +412,7 @@
                                   event.title, @"title",
                                   event.calendar.title, @"calendar",
                                   event.eventIdentifier, @"id",
+                                  @(event.allDay), @"allday",
                                   [df stringFromDate:event.startDate], @"startDate",
                                   [df stringFromDate:event.endDate], @"endDate",
                                   [df stringFromDate:event.lastModifiedDate], @"lastModifiedDate",
@@ -458,6 +492,18 @@
     }
 
     [entry setObject:event.calendarItemIdentifier forKey:@"id"];
+    EKAlarm* alarm = nil;
+    if (event.alarms.count>0 && (alarm=event.alarms[0]).relativeOffset != 0 ) {
+      double minutes=-alarm.relativeOffset/60;
+      [entry setObject:@(minutes) forKey:@"firstReminderMinutes"];
+    }
+    if (event.alarms.count>1 && (alarm=event.alarms[1]).relativeOffset != 0 ) {
+      double minutes=-alarm.relativeOffset/60;
+      [entry setObject:@(minutes) forKey:@"secondReminderMinutes"];
+    }
+    if (event.URL!=nil) {
+      [entry setObject:event.URL.description forKey:@"url"];
+    }
     [results addObject:entry];
   }
   return results;
@@ -717,6 +763,74 @@
   }];
 }
 
+- (void) modifyEventInteractively:(CDVInvokedUrlCommand*)command {
+  if (command.arguments.count==0 || ![command.arguments[0] isKindOfClass:NSDictionary.class]) {
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:@"options argument missing or wrong options type"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+   return;
+  }
+  NSDictionary* options = [command.arguments objectAtIndex:0];
+  NSString* calEventID = [options objectForKey:@"id"];
+  NSString* title      = [options objectForKey:@"title"];
+  NSString* location   = [options objectForKey:@"location"];
+  NSString* notes      = [options objectForKey:@"notes"];
+  NSNumber* startTime  = [options objectForKey:@"startTime"];
+  NSNumber* endTime    = [options objectForKey:@"endTime"];
+  NSString* calendarName = [options objectForKey:@"calendarName"];
+  BOOL checkId = (calEventID!=nil && calEventID!=(id)[NSNull null]);
+  EKEvent* idEvent = nil;
+  if (checkId ) {
+    idEvent = (EKEvent*)[self.eventStore calendarItemWithIdentifier:calEventID];
+    if (idEvent==nil) {
+      CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:[NSString stringWithFormat:@"Can't find event with id:%@",calEventID]];
+      [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+      return;
+    }
+  }
+  EKCalendar* calendar=self.eventStore.defaultCalendarForNewEvents;
+  if (calendarName!=nil && calendarName != (id)[NSNull null]) {
+    calendar = [self findEKCalendar:calendarName];
+  }
+
+  NSTimeInterval _startInterval = [startTime doubleValue] / 1000; // strip millis
+  NSDate *myStartDate = [NSDate dateWithTimeIntervalSince1970:_startInterval];
+
+  NSTimeInterval _endInterval = [endTime doubleValue] / 1000; // strip millis
+  NSDate *myEndDate = [NSDate dateWithTimeIntervalSince1970:_endInterval];
+
+  NSArray *calendars = [NSArray arrayWithObject:calendar];
+  NSArray* matchingEvents;
+  if (checkId && (startTime==nil || startTime==(id)[NSNull null]) && (endTime==nil ||endTime==(id)[NSNull null])) {
+    matchingEvents=@[idEvent];
+  } else {
+    matchingEvents = [self findEKEventsWithTitle:title location:location notes:notes startDate:myStartDate endDate:myEndDate calendars:calendars];
+  }
+
+  EKEvent* eventToModify=nil;
+  for (EKEvent * event in matchingEvents) {
+    if (checkId && ![calEventID isEqualToString:event.calendarItemIdentifier]) {
+       continue;
+    }
+    eventToModify=event;
+    break;
+  }
+  if (eventToModify!=nil) {
+    self.interactiveModify = YES;
+    self.interactiveCallbackId = command.callbackId;
+    EKEventEditViewController* controller = [[EKEventEditViewController alloc] init];
+    controller.event = eventToModify;
+    controller.eventStore = self.eventStore;
+    controller.editViewDelegate = self;
+    Calendar* __weak weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [weakSelf.viewController presentViewController:controller animated:YES completion:nil];
+    });
+  } else {
+    CDVPluginResult *pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString: @"Can't find event for modify"];
+    [self.commandDelegate sendPluginResult:pluginResult callbackId:command.callbackId];
+  }
+}
+
 - (void) deleteEventFromNamedCalendar:(CDVInvokedUrlCommand*)command {
   NSDictionary* options = [command.arguments objectAtIndex:0];
   NSString* calendarName = [options objectForKey:@"calendarName"];
@@ -911,34 +1025,44 @@
 }
 
 - (void) eventEditViewController:(EKEventEditViewController*)controller didCompleteWithAction:(EKEventEditViewAction) action {
-  NSError *error = nil;
+  //avoid multiple invocations when deleting
+  controller.editViewDelegate=nil;
   CDVPluginResult *pluginResult = nil;
 
   switch (action) {
     case EKEventEditViewActionCanceled:
-      pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
+      if (self.interactiveModify) {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Canceled"];
+      } else {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
+      }
       break;
 
     case EKEventEditViewActionSaved:
-      [controller.eventStore saveEvent:controller.event span:EKSpanThisEvent error:&error];
-      pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:controller.event.calendarItemIdentifier];
+      if (self.interactiveModify) {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Saved"];
+      } else {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:controller.event.calendarItemIdentifier];
+      }
       break;
 
     case EKEventEditViewActionDeleted:
-      pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
-      break;
-
-    default:
-      pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
+      if (self.interactiveModify) {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsString:@"Deleted"];
+      } else {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_NO_RESULT];
+      }
       break;
   }
-
-  [controller dismissViewControllerAnimated:YES completion:nil];
-
-  if (error) {
-    pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString:error.userInfo.description];
-  }
-  [self.commandDelegate sendPluginResult:pluginResult callbackId:self.interactiveCallbackId];
+  //reset the interactive properties
+  self.interactiveModify = NO;
+  Calendar* __weak weakSelf = self;
+  [controller dismissViewControllerAnimated:YES completion:^{
+    //give back the result if the animation has been finished:
+    //this avoid glitches in the UI if another dialog is opened in the next
+    //interaction
+    [weakSelf.commandDelegate sendPluginResult:pluginResult callbackId:weakSelf.interactiveCallbackId];
+  }];
 }
 
 

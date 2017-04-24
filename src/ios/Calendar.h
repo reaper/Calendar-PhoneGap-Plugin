@@ -7,6 +7,7 @@
 
 @property (nonatomic, retain) EKEventStore* eventStore;
 @property (nonatomic, copy) NSString *interactiveCallbackId;
+@property (nonatomic) BOOL interactiveModify;
 
 - (void)initEventStoreWithCalendarCapabilities;
 

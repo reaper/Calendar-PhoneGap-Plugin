@@ -1,0 +1,5 @@
+<StyleList>
+  <Style name="DateEdit.small">
+     <StyleAttribute name="fontSize" value="12pt" />
+  </Style>
+</StyleList>

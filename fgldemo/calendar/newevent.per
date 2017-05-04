@@ -1,0 +1,45 @@
+# Property of Four Js*
+# (c) Copyright Four Js 2017, 2017. All Rights Reserved.
+# * Trademark of Four Js Development Tools Europe Ltd
+#   in the United States and elsewhere
+# 
+# Four Js and its suppliers do not warrant or guarantee that these
+# samples are accurate and suitable for your purposes. Their inclusion is
+# purely for information purposes only.
+
+LAYOUT(TEXT="Event")
+STACK
+GROUP --(TEXT="Title")
+EDIT FORMONLY.TITLE,COMMENT="<Enter Title>",JUSTIFY=LEFT;
+END
+GROUP
+CHECKBOX FORMONLY.allday,TITLE="All-day";
+DATETIMEEDIT FORMONLY.startDate,TITLE="Starts",NOT NULL;
+DATETIMEEDIT FORMONLY.endDate,TITLE="Ends",NOT NULL;
+COMBOBOX FORMONLY.freq,TITLE="Repeat",ITEMS=((NULL,"Never"),
+                                 ("daily","Every Day"),
+                                 ("weekly","Every Week"),
+                                 ("monthly","Every Month"),
+                                 ("yearly","Every Year"));
+END
+GROUP --(TEXT="Alerts")
+COMBOBOX FORMONLY.firstReminderMinutes,TITLE="Alert",ITEMS=((NULL,"None"),
+                                             (15,"15 min before"),
+                                             (60,"1 hour before"),
+                                             (1440,"1 day before"),
+                                             (10080,"1 week before"),
+                                             (46080,"1 month before"));
+COMBOBOX FORMONLY.secondReminderMinutes,TITLE="Second Alert",ITEMS=((NULL,"None"),
+                                             (15,"15 min before"),
+                                             (60,"1 hour before"),
+                                             (1440,"1 day before"),
+                                             (10080,"1 week before"),
+                                             (46080,"1 month before"));
+END
+
+GROUP
+EDIT FORMONLY.url,COMMENT="<Url>",JUSTIFY=LEFT;
+TEXTEDIT FORMONLY.notes,COMMENT="<Notes>";
+END
+
+END

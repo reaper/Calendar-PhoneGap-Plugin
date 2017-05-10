@@ -105,7 +105,7 @@ public abstract class AbstractCalendarAccessor {
         String email;
         String status;
 
-        public JONObject toJSONObject() {
+        public JSONObject toJSONObject() {
             JSONObject obj = new JSONObject();
             try {
                 obj.put("id", this.id);

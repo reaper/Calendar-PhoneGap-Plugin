@@ -59,7 +59,7 @@ public abstract class AbstractCalendarAccessor {
         public JSONObject toJSONObject() {
             JSONObject obj = new JSONObject();
             try {
-                obj.put("id", this.eventId);
+                obj.putOpt("id", this.eventId);
                 obj.putOpt("message", this.message);
                 obj.putOpt("location", this.location);
                 obj.putOpt("title", this.title);
